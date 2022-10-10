@@ -1,7 +1,7 @@
 const crypto = require("node:crypto");
 const base64 = require("base-64");
 const axios = require("axios");
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-extra");
 const siteModel = require("../models/site");
 const settingModel = require("../models/setting");
 
@@ -59,6 +59,16 @@ const getFormQueryStr = (data) => {
     let dataQuery = items.join("&");
     return dataQuery;
 }
+const JSON_to_URLEncoded = (element,key,list) => {
+    var list = list || [];
+    if(typeof(element)=='object'){
+        for (var idx in element)
+        JSON_to_URLEncoded(element[idx],key?key+'['+idx+']':idx,list);
+    } else {
+        list.push(key+'='+encodeURIComponent(element));
+    }
+    return list.join('&');
+}
 const genSess = (dataBuffer, userAgent, ipAddr) => {
     let now = new Date().getTime();
     let timeSignedBuffer = Buffer.alloc(4);
@@ -91,9 +101,38 @@ const isAccessable = async (uid, site) => {
 }
 const spamzillaAutoLogin = async (email, password) => {
     return new Promise (async (resolve, reject) => {
-        const browser = await puppeteer.launch({
-            headless: false, timeout: 100000
-        });
+        const windowsLikePathRegExp = /[a-z]:\\/i;
+        let inProduction = false;
+
+        if (! windowsLikePathRegExp.test(__dirname)) {
+            inProduction = true;
+        }
+        let options = {};
+        if (inProduction) {
+            options = {
+                headless : true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--media-cache-size=0',
+                    '--disk-cache-size=0',
+                    '--ignore-certificate-errors',
+                    '--ignore-certificate-errors-spki-list',
+                ],
+                timeout: 100000,
+            };
+        } else {
+            options = {
+                headless : false,
+                timeout: 100000,
+                args: [
+                    '--ignore-certificate-errors',
+                    '--ignore-certificate-errors-spki-list',
+                ],
+            };
+        }
+        const browser = await puppeteer.launch(options);
         const page = await browser.newPage();
         await page.goto('https://www.spamzilla.io/account/login/', {waitUntil: 'load', timeout: 100000});
         await page.focus("#loginform-email").then(async () => {
@@ -134,5 +173,6 @@ module.exports = {
     isAccessable,
     getMainDomain,
     getFormQueryStr,
+    JSON_to_URLEncoded,
     spamzillaAutoLogin
 }

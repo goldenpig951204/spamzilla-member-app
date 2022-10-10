@@ -11,9 +11,9 @@ const {
     isValidSess,
     isAccessable,
     getFormQueryStr,
+    JSON_to_URLEncoded,
     spamzillaAutoLogin
 } = require("../services/utils");
-const handleHelpers = require("../services/handleHelpers");
 const sistrixMiddleware = require("./sistrixMiddleware");
 const settingModel = require("../models/setting");
 const proxyModel = require("../models/proxy");
@@ -60,17 +60,14 @@ const authMiddleware = async (req, res, next) => {
     sessionMapper.set(`${site}-${user.id}`, newSess);
     res.cookie("sess", newSess, {
         path: "/",
-        // domain: process.env.NODE_ENV === "development" ? undefined : getMainDomain(domain)
         domain: process.env.NODE_ENV === "development" ? undefined : domain
     });
     res.cookie("wpInfo", base64.encode(JSON.stringify({user, site})), {
         path: "/",
-        // domain: process.env.NODE_ENV === "development" ? undefined : getMainDomain(domain)
         domain: process.env.NODE_ENV === "development" ? undefined : domain
     });
     res.cookie("prefix", "www", {
         path: "/",
-        // domain: process.env.NODE_ENV === "development" ? undefined : getMainDomain(domain)
         domain: process.env.NODE_ENV === "development" ? undefined : domain
     });
     next();
@@ -89,7 +86,6 @@ const memberMiddleware = (req, res, next) => {
     let wpInfoDecoded = JSON.parse(base64.decode(wpInfo));
     if (!wpInfoDecoded.user.accessAble) return res.status(400).end('Membership required.');
     if (!sessionMapper.get(`${wpInfoDecoded.site}-${wpInfoDecoded.user.id}`)) sessionMapper.set(`${wpInfoDecoded.site}-${wpInfoDecoded.user.id}`, sess);
-    // if (sessionMapper.get(`${wpInfoDecoded.site}-${wpInfoDecoded.user.id}`) !== sess) return res.status(400).end('Multiple Browsers is not allowed.');
     req.user = wpInfoDecoded.user;
     req.wpSite = wpInfoDecoded.site;
     next();
@@ -138,7 +134,6 @@ const semrushMiddleware = (prefix) => {
         },
         onProxyRes: responseInterceptor(
             (responseBuffer, proxyRes, req, res) => {
-                // let domain = req.headers["host"];
                 let domain = `https://${req.headers["host"]}`;
                 if (req.url.match(/\.(css|json|js|text|png|jpg|map|ico|svg)/)) {
                     return responseBuffer;
@@ -307,7 +302,6 @@ const spyfuMiddleware = (prefix) => {
         },
         onProxyRes: responseInterceptor(
             (responseBuffer, proxyRes, req, res) => {
-                // let domain = req.headers["host"];
                 let domain = `https://${req.headers["host"]}`;
                 if (req.url.match(/\.(css|json|js|text|png|jpg|map|ico|svg)/)) {
                     return responseBuffer;
@@ -503,7 +497,7 @@ const linkcentaurMiddleware = (prefix) => createProxyMiddleware({
             }
 
             if (contentType && contentType.includes("application/x-www-form-urlencoded")) {
-                let body = getFormQueryStr(req.body);
+                let body = JSON_to_URLEncoded(req.body);
                 proxyReq.setHeader("content-type", "application/x-www-form-urlencoded");
                 writeBody(body);
             }
@@ -566,7 +560,6 @@ const spamzillaMiddleware = (prefix) => createProxyMiddleware({
     changeOrigin: true,
     onProxyReq: (proxyReq, req) => {
         let userAgent = req.headers["user-agent"];
-        console.log(userAgent)
         let { cookie } = req.proxy;
         proxyReq.setHeader("user-agent", userAgent);
         proxyReq.setHeader("Cookie", cookie);
@@ -583,16 +576,13 @@ const spamzillaMiddleware = (prefix) => createProxyMiddleware({
             }
 
             if (contentType && contentType.includes("application/x-www-form-urlencoded")) {
-                let body = getFormQueryStr(req.body);
+                let body = JSON_to_URLEncoded(req.body);
                 proxyReq.setHeader("content-type", "application/x-www-form-urlencoded");
                 writeBody(body);
             }
             
             if (contentType && contentType.includes("multipart/form-data")) {
                 proxyReq.setHeader("content-type", "application/json");
-                if (typeof req.body.links_form !== "undefined") {
-                    req.body.links_form.urls_input_mode = "form";
-                }
                 writeBody(JSON.stringify(req.body));
             }
         }
@@ -600,10 +590,10 @@ const spamzillaMiddleware = (prefix) => createProxyMiddleware({
     onProxyRes: responseInterceptor(
         async (responseBuffer, proxyRes, req, res) => {
             let domain = `https://${req.headers["host"]}`;
-            // let domain = `http://${req.headers["host"]}`;
             if (req.url.match(/\.(css|json|js|text|png|jpg|map|ico|svg)/)) {
                 return responseBuffer;
             }
+            
             if (req.path == "/do-auto-login") {
                 try {
                     let { username, password } = await credentialModel.findOne({"type": "smapzilla"});
@@ -643,6 +633,11 @@ const spamzillaMiddleware = (prefix) => createProxyMiddleware({
                 let response = responseBuffer.toString("utf-8");
                 if (/tools\/export\//.test(req.path) || /expired-domains\/export\//.test(req.path)) {
                     return responseBuffer;
+                } else if (req.method === "POST" && /domains/.test(req.path)) {
+                    let content = responseBuffer.toString("utf-8");
+                    content = content.replace(/https:\/\/www.spamzilla.io/g, domain);
+                    res.statusCode = 200;
+                    return content;
                 } else {
                     let $ = cheerio.load(response);
                     let anchors = $("a");
